@@ -1,7 +1,8 @@
 'use client';
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { toast } from 'sonner';
 import { INITIAL_EVENT_STATE, type EventState, type PersonalState } from '@/lib/eventStore';
+import { loadLiveEvent, saveLiveEvent, subscribeToLiveEvent } from '@/lib/liveEvent';
 import PhasePill from '@/components/ui/PhasePill';
 import VoterJoinForm from './VoterJoinForm';
 import VoterBallot from './VoterBallot';
@@ -24,6 +25,23 @@ export default function VoterScreenClient({ token, tokenValid, tokenPayload }: {
   const [event, setEvent] = useState<EventState>(INITIAL_EVENT_STATE);
   const [personal, setPersonal] = useState<PersonalState>({ name: null, votes: {} });
 
+  useEffect(() => {
+    let cancelled = false;
+
+    void loadLiveEvent().then((next) => {
+      if (!cancelled) setEvent(next);
+    }).catch(() => undefined);
+
+    const unsubscribe = subscribeToLiveEvent((next) => {
+      if (!cancelled) setEvent(next);
+    });
+
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
+  }, []);
+
   const joined = !!personal.name && !!event.participants.find(p => p.id === VOTER_ID);
 
   const currentLevelNodes = event.nodes.filter(n => n.parentId === event.currentParentId);
@@ -44,10 +62,14 @@ export default function VoterScreenClient({ token, tokenValid, tokenPayload }: {
       return;
     }
     const newParticipant = { id: VOTER_ID, name: name.trim(), joinedAt: new Date().toISOString() };
-    setEvent(prev => ({
-      ...prev,
-      participants: [...prev.participants.filter(p => p.id !== VOTER_ID), newParticipant],
-    }));
+    setEvent(prev => {
+      const next = {
+        ...prev,
+        participants: [...prev.participants.filter(p => p.id !== VOTER_ID), newParticipant],
+      };
+      void saveLiveEvent(next);
+      return next;
+    });
     setPersonal(prev => ({ ...prev, name: name.trim() }));
     toast.success(`Welcome, ${name.trim()}! You're in the queue.`);
   };
@@ -65,12 +87,16 @@ export default function VoterScreenClient({ token, tokenValid, tokenPayload }: {
     const node = event.nodes.find(n => n.id === nodeId);
     if (!node) return;
 
-    setEvent(prev => ({
-      ...prev,
-      nodes: prev.nodes.map(n =>
-        n.id === nodeId ? { ...n, votes: (n.votes || 0) + 1 } : n
-      ),
-    }));
+    setEvent(prev => {
+      const next = {
+        ...prev,
+        nodes: prev.nodes.map(n =>
+          n.id === nodeId ? { ...n, votes: (n.votes || 0) + 1 } : n
+        ),
+      };
+      void saveLiveEvent(next);
+      return next;
+    });
     setPersonal(prev => ({
       ...prev,
       votes: { ...prev.votes, [roundKey]: nodeId },

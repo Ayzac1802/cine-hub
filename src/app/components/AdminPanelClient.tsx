@@ -1,8 +1,9 @@
 'use client';
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { toast } from 'sonner';
 import { Shield, ChevronRight, Users, Vote, Lock, AlertCircle, ChevronDown, Eye, Clapperboard } from 'lucide-react';
 import { INITIAL_EVENT_STATE, type EventState, type EventNode } from '@/lib/eventStore';
+import { loadLiveEvent, saveLiveEvent, subscribeToLiveEvent } from '@/lib/liveEvent';
 import StatCard from '@/components/ui/StatCard';
 import PhasePill from '@/components/ui/PhasePill';
 import ConfirmModal from '@/components/ui/ConfirmModal';
@@ -27,13 +28,38 @@ export default function AdminPanelClient() {
   const [event, setEvent] = useState<EventState>(INITIAL_EVENT_STATE);
   const [resetModalOpen, setResetModalOpen] = useState(false);
 
+  const syncEvent = useCallback((next: EventState) => {
+    setEvent(next);
+    void saveLiveEvent(next);
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    void loadLiveEvent().then((next) => {
+      if (!cancelled) setEvent(next);
+    }).catch(() => undefined);
+
+    const unsubscribe = subscribeToLiveEvent((next) => {
+      if (!cancelled) {
+        setEvent(next);
+      }
+    });
+
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
+  }, []);
+
   const handleSetupComplete = (config: { eventName: string; passcode: string; qrSize: number }) => {
-    setEvent(prev => ({
-      ...prev,
+    const next = {
+      ...event,
       eventName: config.eventName,
       passcode: config.passcode,
       qrSize: config.qrSize,
-    }));
+    };
+    syncEvent(next);
     setSetupDone(true);
     toast.success(`Event "${config.eventName}" created`);
   };
@@ -72,12 +98,13 @@ export default function AdminPanelClient() {
       currentLevelNodes().find(c => c.id === n.id) ? { ...n, votes: 0 } : n
     );
     updated.phase = 'voting';
-    setEvent(updated);
+    syncEvent(updated);
     toast.success('Voting started — voters can now cast their picks');
   };
 
   const handleCloseVoting = () => {
-    setEvent(prev => ({ ...prev, phase: 'results' }));
+    const next = { ...event, phase: 'results' as const };
+    syncEvent(next);
     toast.success('Voting closed — results are now visible');
   };
 
@@ -89,32 +116,35 @@ export default function AdminPanelClient() {
     }
     const winner = ranked[0];
     const kids = childrenOf(winner.id);
-    setEvent(prev => ({
-      ...prev,
-      winnerPath: [...prev.winnerPath, winner.id],
+    const next = {
+      ...event,
+      winnerPath: [...event.winnerPath, winner.id],
       currentParentId: winner.id,
-      phase: kids.length ? 'voting' : 'finished',
-      nodes: kids.length ? prev.nodes.map(n =>
+      phase: kids.length ? 'voting' as const : 'finished' as const,
+      nodes: kids.length ? event.nodes.map(n =>
         kids.find(k => k.id === n.id) ? { ...n, votes: 0 } : n
-      ) : prev.nodes,
-    }));
+      ) : event.nodes,
+    };
+    syncEvent(next);
     toast.success(`"${winner.name}" advances to the next round`);
   };
 
   const handleReopenLobby = () => {
-    setEvent(prev => ({ ...prev, phase: 'lobby' }));
+    const next = { ...event, phase: 'lobby' as const };
+    syncEvent(next);
     toast.info('Event returned to lobby');
   };
 
   const handleReset = () => {
-    setEvent(prev => ({
-      ...prev,
-      phase: 'lobby',
+    const next = {
+      ...event,
+      phase: 'lobby' as const,
       currentParentId: null,
       winnerPath: [],
       participants: [],
-      nodes: prev.nodes.map(n => ({ ...n, votes: 0 })),
-    }));
+      nodes: event.nodes.map(n => ({ ...n, votes: 0 })),
+    };
+    syncEvent(next);
     setResetModalOpen(false);
     toast.success('Event reset — ready for a new session');
   };
@@ -122,7 +152,8 @@ export default function AdminPanelClient() {
   const handleAddNode = (parentId: string | null, name: string) => {
     if (!name.trim()) return;
     const newNode: EventNode = { id: uid(), parentId, name: name.trim(), votes: 0 };
-    setEvent(prev => ({ ...prev, nodes: [...prev.nodes, newNode] }));
+    const next = { ...event, nodes: [...event.nodes, newNode] };
+    syncEvent(next);
     toast.success(`"${name.trim()}" added`);
   };
 
@@ -138,15 +169,14 @@ export default function AdminPanelClient() {
         }
       });
     }
-    setEvent(prev => ({ ...prev, nodes: prev.nodes.filter(n => !toRemove.has(n.id)) }));
+    const next = { ...event, nodes: event.nodes.filter(n => !toRemove.has(n.id)) };
+    syncEvent(next);
     toast.success('Item removed');
   };
 
   const handleUpdateNode = (id: string, updates: Partial<EventNode>) => {
-    setEvent(prev => ({
-      ...prev,
-      nodes: prev.nodes.map(n => n.id === id ? { ...n, ...updates } : n),
-    }));
+    const next = { ...event, nodes: event.nodes.map(n => n.id === id ? { ...n, ...updates } : n) };
+    syncEvent(next);
     toast.success('Item updated');
   };
 

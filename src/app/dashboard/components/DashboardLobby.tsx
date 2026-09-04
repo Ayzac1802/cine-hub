@@ -8,7 +8,7 @@ interface DashboardLobbyProps {
 }
 
 export default function DashboardLobby({ participants }: DashboardLobbyProps) {
-  const voterUrl = 'https://cinehub.app/voter-screen';
+  const voterUrl = 'https://cinehub.app/voter-screen?event=${Lobby}';
   const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=280x280&color=F4F2EC&bgcolor=171B31&data=${encodeURIComponent(voterUrl)}`;
 
   return (
